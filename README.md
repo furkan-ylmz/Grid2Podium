@@ -1,4 +1,4 @@
-# BIM 430 Derin Ogrenme Proje Odevi: Formula 1 Yaris Sonucu Tahmin Sistemi
+# Formula 1 Yaris Sonucu Tahmin Sistemi
 
 ## Proje Hakkinda
 Bu proje, 2019-2026 yillari arasindaki Formula 1 yaris verilerini kullanarak, yaris sonuclari uzerine bir siniflandirma tahmini yapmayi amaclamaktadir. Proje kapsaminda uc farkli derin ogrenme modeli gelistirilmis ve performanslari karsilastirilmistir.
@@ -18,7 +18,7 @@ Yaris sonuclari, veri setindeki dengesizligi azaltmak ve model basarisini artirm
 
 ## Proje Yapisi
 - data_preprocessing.py: Veri setlerinin birlestirilmesi, veri sizintisi (leakage) yapan sutunlarin temizlenmesi ve verinin %70 egitim, %20 dogrulama, %10 test olarak bolunmesi islemlerini yapar.
-- train_models.py: Uc farkli modelin (Ozel MLP, LSTM, Wide & Deep) egitilmesi, test edilmesi ve karsilastirmali grafiklerin olusturulmasi sureclerini yonetir.
+- train_models.py: Uc farkli modelin (MLP, LSTM, Wide & Deep) egitilmesi, test edilmesi ve karsilastirmali grafiklerin olusturulmasi sureclerini yonetir.
 - app.py: Egitilmis en basarili modelin (LSTM) kullanici tarafindan test edilebilmesini saglayan web arayuzu dosyasidir.
 - datasets/: Ham CSV dosyalarinin bulundugu dizin.
 - processed_data/: Islenmis verilerin ve encoder dosyalarinin saklandigi dizin.
@@ -26,7 +26,7 @@ Yaris sonuclari, veri setindeki dengesizligi azaltmak ve model basarisini artirm
 - results/: Egitim kaybi, dogruluk ve confusion matrix grafiklerinin kaydedildigi dizin.
 
 ## Model Mimarileri
-1. Ozel MLP (Ogrenci Tasarimi): BatchNorm, Dropout ve ReLU aktivasyon fonksiyonlari ile desteklenmis cok katmanli algilayici mimarisi.
+1. MLP: BatchNorm, Dropout ve ReLU aktivasyon fonksiyonlari ile desteklenmis cok katmanli algilayici mimarisi.
 2. LSTM: F1 verilerindeki sirali yapiyi ve takvimsel etkileri yakalamak amaciyla kullanilan uzun kisa sureli bellek agi.
 3. Wide & Deep: Tablosal verilerde hem genis ozellikleri hem de derin ogrenme modellerinin yakaladigi karmasik iliskileri birlestiren mimari.
 

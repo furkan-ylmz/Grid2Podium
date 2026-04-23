@@ -9,15 +9,13 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import os
 
-# --- 1. Veri Yükleme ve Hazırlama ---
 print("Veriler yükleniyor...")
 train_df = pd.read_csv('processed_data/train.csv')
 val_df = pd.read_csv('processed_data/val.csv')
 test_df = pd.read_csv('processed_data/test.csv')
 
-# Kategorik değişkenleri One-Hot Encode yapalım
 cat_cols = ['Track', 'Driver', 'Team', 'Year']
-# Tüm veriyi birleştirip dummy değişkenleri oluşturarak tutarsızlıkları önleyelim
+
 all_df = pd.concat([train_df, val_df, test_df], keys=['train', 'val', 'test'])
 all_df = pd.get_dummies(all_df, columns=cat_cols)
 
@@ -34,18 +32,14 @@ y_val = val_df['Target_Tier'].values.astype(np.int64)
 X_test = test_df.drop('Target_Tier', axis=1).values.astype(np.float32)
 y_test = test_df['Target_Tier'].values.astype(np.int64)
 
-# PyTorch TensorDataset & DataLoader
 batch_size = 32
 train_loader = DataLoader(TensorDataset(torch.tensor(X_train), torch.tensor(y_train)), batch_size=batch_size, shuffle=True)
 val_loader = DataLoader(TensorDataset(torch.tensor(X_val), torch.tensor(y_val)), batch_size=batch_size)
 test_loader = DataLoader(TensorDataset(torch.tensor(X_test), torch.tensor(y_test)), batch_size=batch_size)
 
 input_dim = X_train.shape[1]
-output_dim = 3 # 3 Sınıf (Podyum, Puan, Puansız)
+output_dim = 3
 
-# --- 2. Model Tanımlamaları ---
-
-# Model 1: Özel MLP (Öğrenci Tasarımı)
 class CustomMLP(nn.Module):
     def __init__(self, input_dim, output_dim):
         super(CustomMLP, self).__init__()
@@ -64,7 +58,6 @@ class CustomMLP(nn.Module):
     def forward(self, x):
         return self.net(x)
 
-# Model 2: LSTM
 class SimpleLSTM(nn.Module):
     def __init__(self, input_dim, hidden_dim=64, output_dim=3):
         super(SimpleLSTM, self).__init__()
@@ -72,13 +65,11 @@ class SimpleLSTM(nn.Module):
         self.fc = nn.Linear(hidden_dim, output_dim)
         
     def forward(self, x):
-        # x shape: (batch, features) -> LSTM bekler: (batch, seq_len, features)
         x = x.unsqueeze(1) 
         out, _ = self.lstm(x)
-        out = out[:, -1, :] # Son time step
+        out = out[:, -1, :]
         return self.fc(out)
 
-# Model 3: Wide & Deep Model (Literatür Modeli 2)
 class WideAndDeep(nn.Module):
     def __init__(self, input_dim, output_dim):
         super(WideAndDeep, self).__init__()
@@ -93,9 +84,7 @@ class WideAndDeep(nn.Module):
             nn.Linear(128, 64),
             nn.ReLU()
         )
-        # Wide part is just linear connection from input to output
         self.wide = nn.Linear(input_dim, output_dim)
-        # Final connection
         self.out = nn.Linear(64 + output_dim, output_dim)
         
     def forward(self, x):
@@ -104,7 +93,6 @@ class WideAndDeep(nn.Module):
         combined = torch.cat([deep_out, wide_out], dim=1)
         return self.out(combined)
 
-# --- 3. Eğitim Fonksiyonu ---
 def train_model(model, name, epochs=30):
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=0.01)
@@ -125,8 +113,7 @@ def train_model(model, name, epochs=30):
             
         avg_loss = running_loss / len(train_loader)
         train_losses.append(avg_loss)
-        
-        # Validation
+
         model.eval()
         correct = 0
         total = 0
@@ -141,7 +128,6 @@ def train_model(model, name, epochs=30):
         
     return train_losses, val_accuracies
 
-# --- 4. Değerlendirme Fonksiyonu ---
 def evaluate_model(model, name):
     model.eval()
     y_true = []
@@ -170,8 +156,7 @@ def evaluate_model(model, name):
 
 def plot_results(all_train_losses, all_val_accs, all_cms, model_names):
     os.makedirs('results', exist_ok=True)
-    
-    # 1. Eğitim Kaybı (Training Loss) Grafiği
+
     plt.figure(figsize=(10, 5))
     for i, model_name in enumerate(model_names):
         plt.plot(all_train_losses[i], label=model_name)
@@ -181,8 +166,7 @@ def plot_results(all_train_losses, all_val_accs, all_cms, model_names):
     plt.legend()
     plt.savefig('results/training_loss.png')
     plt.close()
-    
-    # 2. Doğruluk (Validation Accuracy) Grafiği
+
     plt.figure(figsize=(10, 5))
     for i, model_name in enumerate(model_names):
         plt.plot(all_val_accs[i], label=model_name)
@@ -192,8 +176,7 @@ def plot_results(all_train_losses, all_val_accs, all_cms, model_names):
     plt.legend()
     plt.savefig('results/validation_accuracy.png')
     plt.close()
-    
-    # 3. Confusion Matrix Grafikleri
+
     fig, axes = plt.subplots(1, 3, figsize=(18, 5))
     for i, model_name in enumerate(model_names):
         sns.heatmap(all_cms[i], annot=True, fmt='d', ax=axes[i], cmap='Blues', 
@@ -206,7 +189,6 @@ def plot_results(all_train_losses, all_val_accs, all_cms, model_names):
     plt.savefig('results/confusion_matrices.png')
     plt.close()
 
-# --- 5. Ana Çalıştırma ---
 def main():
     print("Modeller tanımlanıyor...")
     model_mlp = CustomMLP(input_dim, output_dim)
@@ -225,12 +207,10 @@ def main():
         train_losses, val_accs = train_model(model, name, epochs=100)
         all_train_losses.append(train_losses)
         all_val_accs.append(val_accs)
-        
-        # Test seti değerlendirmesi
+
         acc, prec, rec, f1, cm = evaluate_model(model, name)
         all_cms.append(cm)
-        
-        # Modeli ve eğitim sütunlarını arayüzde kullanmak için kaydet
+
         if "LSTM" in name:
             os.makedirs('models', exist_ok=True)
             torch.save(model.state_dict(), 'models/lstm_model.pth')
