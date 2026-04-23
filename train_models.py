@@ -32,7 +32,7 @@ y_val = val_df['Target_Tier'].values.astype(np.int64)
 X_test = test_df.drop('Target_Tier', axis=1).values.astype(np.float32)
 y_test = test_df['Target_Tier'].values.astype(np.int64)
 
-batch_size = 32
+batch_size = 256
 train_loader = DataLoader(TensorDataset(torch.tensor(X_train), torch.tensor(y_train)), batch_size=batch_size, shuffle=True)
 val_loader = DataLoader(TensorDataset(torch.tensor(X_val), torch.tensor(y_val)), batch_size=batch_size)
 test_loader = DataLoader(TensorDataset(torch.tensor(X_test), torch.tensor(y_test)), batch_size=batch_size)
@@ -202,25 +202,46 @@ def main():
     all_val_accs = []
     all_cms = []
     
+    best_acc = 0.0
+    best_model = None
+    best_model_name = ""
+
     for model, name in zip(models, model_names):
         print(f"\n{name} eğitimi başlıyor...")
-        train_losses, val_accs = train_model(model, name, epochs=100)
+        train_losses, val_accs = train_model(model, name, epochs=30)
         all_train_losses.append(train_losses)
         all_val_accs.append(val_accs)
 
         acc, prec, rec, f1, cm = evaluate_model(model, name)
         all_cms.append(cm)
 
-        if "LSTM" in name:
-            os.makedirs('models', exist_ok=True)
-            torch.save(model.state_dict(), 'models/lstm_model.pth')
-            print("LSTM Modeli 'models/lstm_model.pth' olarak kaydedildi.")
-            
-            import pickle
-            feature_cols = train_df.drop('Target_Tier', axis=1).columns.tolist()
-            with open('models/feature_columns.pkl', 'wb') as f:
-                pickle.dump(feature_cols, f)
-            print("Özellik sütunları (feature columns) 'models/feature_columns.pkl' olarak kaydedildi.")
+        if acc > best_acc:
+            best_acc = acc
+            best_model = model
+            best_model_name = name
+
+    os.makedirs('models', exist_ok=True)
+
+    torch.save(best_model.state_dict(), 'models/best_model.pth')
+    
+    if "MLP" in best_model_name:
+        best_arch = "CustomMLP"
+    elif "LSTM" in best_model_name:
+        best_arch = "SimpleLSTM"
+    else:
+        best_arch = "WideAndDeep"
+
+    import pickle
+    feature_cols = train_df.drop('Target_Tier', axis=1).columns.tolist()
+    
+    with open('models/feature_columns.pkl', 'wb') as f:
+        pickle.dump(feature_cols, f)
+        
+    with open('models/best_model_arch.pkl', 'wb') as f:
+        pickle.dump(best_arch, f)
+        
+    print(f"\nEn iyi model: {best_model_name} ({best_acc:.4f} accuracy) 'models/best_model.pth' olarak kaydedildi.")
+    print("Özellik sütunları ve mimari bilgisi kaydedildi.")
         
     print("Sonuçlar grafiklere dökülüyor ('results' klasörüne kaydedildi)...")
     plot_results(all_train_losses, all_val_accs, all_cms, model_names)

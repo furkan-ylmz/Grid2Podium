@@ -50,7 +50,25 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown("<h1 class='main-title'>Formula 1 Sonuç Tahmin Sistemi 🏎️</h1>", unsafe_allow_html=True)
-st.write("Eğitilmiş LSTM modelimizi kullanarak yarış sonuçlarını (Podyum, Puan veya Puansız) tahmin edin.")
+st.write("En yüksek doğrulukla eğitilmiş yapay zeka modelimizi (MLP, LSTM veya Wide & Deep) kullanarak yarış sonuçlarını (Podyum, Puan veya Puansız) tahmin edin.")
+
+class CustomMLP(nn.Module):
+    def __init__(self, input_dim, output_dim=3):
+        super(CustomMLP, self).__init__()
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, 128),
+            nn.BatchNorm1d(128),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(128, 64),
+            nn.BatchNorm1d(64),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(64, output_dim)
+        )
+        
+    def forward(self, x):
+        return self.net(x)
 
 class SimpleLSTM(nn.Module):
     def __init__(self, input_dim, hidden_dim=64, output_dim=3):
@@ -64,6 +82,28 @@ class SimpleLSTM(nn.Module):
         out = out[:, -1, :] 
         return self.fc(out)
 
+class WideAndDeep(nn.Module):
+    def __init__(self, input_dim, output_dim=3):
+        super(WideAndDeep, self).__init__()
+        self.deep = nn.Sequential(
+            nn.Linear(input_dim, 256),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(256, 128),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(128, 64),
+            nn.ReLU()
+        )
+        self.wide = nn.Linear(input_dim, output_dim)
+        self.out = nn.Linear(64 + output_dim, output_dim)
+        
+    def forward(self, x):
+        deep_out = self.deep(x)
+        wide_out = self.wide(x)
+        combined = torch.cat([deep_out, wide_out], dim=1)
+        return self.out(combined)
+
 @st.cache_resource
 def load_assets():
     with open('processed_data/encoders.pkl', 'rb') as f:
@@ -72,12 +112,23 @@ def load_assets():
     with open('models/feature_columns.pkl', 'rb') as f:
         feature_cols = pickle.load(f)
 
+    with open('models/best_model_arch.pkl', 'rb') as f:
+        best_arch = pickle.load(f)
+
     input_dim = len(feature_cols)
-    model = SimpleLSTM(input_dim=input_dim)
-    model.load_state_dict(torch.load('models/lstm_model.pth', map_location=torch.device('cpu')))
+    
+    if best_arch == "CustomMLP":
+        model = CustomMLP(input_dim=input_dim)
+    elif best_arch == "WideAndDeep":
+        model = WideAndDeep(input_dim=input_dim)
+    else:
+        model = SimpleLSTM(input_dim=input_dim)
+
+    model.load_state_dict(torch.load('models/best_model.pth', map_location=torch.device('cpu')))
     model.eval()
     
     return encoders, feature_cols, model
+
 
 try:
     encoders, feature_cols, model = load_assets()
