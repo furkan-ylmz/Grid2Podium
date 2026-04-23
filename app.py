@@ -1,200 +1,171 @@
-import streamlit as st
+import os
+
 import pandas as pd
-import numpy as np
+import streamlit as st
 import torch
-import torch.nn as nn
-import pickle
 
-st.set_page_config(page_title="F1 Yarış Sonucu Tahmini", page_icon="🏎️", layout="centered")
+from phishing_utils import (
+    MODELS_DIR,
+    create_model,
+    encode_dataframe,
+    load_pickle,
+    prepare_email_dataframe,
+)
 
-st.markdown("""
+
+st.set_page_config(page_title="Phishing Email Detection", page_icon="SH", layout="wide")
+
+st.markdown(
+    """
     <style>
     .stApp {
         background-color: #0e1117;
-        color: white;
+        color: #f5f7fa;
     }
-    .main-title {
-        color: #FF1801; /* F1 Red */
-        text-align: center;
-        font-family: 'Helvetica', sans-serif;
-        font-weight: bold;
-        padding-top: 20px;
+    .result-box {
+        padding: 20px;
+        border-radius: 10px;
+        border: 1px solid #2a2f3a;
+        background: #151a23;
+        margin-top: 18px;
     }
-    /* Girdi alanlarının başlıklarını beyaz yapalım */
-    .stSelectbox label, .stNumberInput label {
-        color: white !important;
+    .safe-box {
+        border-color: #1db954;
+        box-shadow: 0 0 0 1px rgba(29, 185, 84, 0.18);
     }
-    .prediction-box {
-        background-color: #1a1c24;
-        padding: 25px;
-        border-radius: 15px;
-        border: 1px solid #FF1801;
-        box-shadow: 0 4px 15px rgba(255, 24, 1, 0.2);
-        text-align: center;
-        margin-top: 25px;
-    }
-    /* Buton tasarımı */
-    .stButton>button {
-        background-color: #FF1801;
-        color: white;
-        border-radius: 5px;
-        border: none;
-        height: 3em;
-        font-weight: bold;
-    }
-    .stButton>button:hover {
-        background-color: #D61400;
-        color: white;
+    .phishing-box {
+        border-color: #ff4b4b;
+        box-shadow: 0 0 0 1px rgba(255, 75, 75, 0.18);
     }
     </style>
-""", unsafe_allow_html=True)
+    """,
+    unsafe_allow_html=True,
+)
 
-st.markdown("<h1 class='main-title'>Formula 1 Sonuç Tahmin Sistemi 🏎️</h1>", unsafe_allow_html=True)
-st.write("En yüksek doğrulukla eğitilmiş yapay zeka modelimizi (MLP, LSTM veya Wide & Deep) kullanarak yarış sonuçlarını (Podyum, Puan veya Puansız) tahmin edin.")
+st.title("Phishing Email Detection System")
+st.caption("Best deep learning model trained on the MeAJOR phishing email dataset.")
 
-class CustomMLP(nn.Module):
-    def __init__(self, input_dim, output_dim=3):
-        super(CustomMLP, self).__init__()
-        self.net = nn.Sequential(
-            nn.Linear(input_dim, 128),
-            nn.BatchNorm1d(128),
-            nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(128, 64),
-            nn.BatchNorm1d(64),
-            nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(64, output_dim)
-        )
-        
-    def forward(self, x):
-        return self.net(x)
-
-class SimpleLSTM(nn.Module):
-    def __init__(self, input_dim, hidden_dim=64, output_dim=3):
-        super(SimpleLSTM, self).__init__()
-        self.lstm = nn.LSTM(input_dim, hidden_dim, batch_first=True)
-        self.fc = nn.Linear(hidden_dim, output_dim)
-        
-    def forward(self, x):
-        x = x.unsqueeze(1) 
-        out, _ = self.lstm(x)
-        out = out[:, -1, :] 
-        return self.fc(out)
-
-class WideAndDeep(nn.Module):
-    def __init__(self, input_dim, output_dim=3):
-        super(WideAndDeep, self).__init__()
-        self.deep = nn.Sequential(
-            nn.Linear(input_dim, 256),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(256, 128),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(128, 64),
-            nn.ReLU()
-        )
-        self.wide = nn.Linear(input_dim, output_dim)
-        self.out = nn.Linear(64 + output_dim, output_dim)
-        
-    def forward(self, x):
-        deep_out = self.deep(x)
-        wide_out = self.wide(x)
-        combined = torch.cat([deep_out, wide_out], dim=1)
-        return self.out(combined)
 
 @st.cache_resource
 def load_assets():
-    with open('processed_data/encoders.pkl', 'rb') as f:
-        encoders = pickle.load(f)
-    
-    with open('models/feature_columns.pkl', 'rb') as f:
-        feature_cols = pickle.load(f)
+    assets_path = os.path.join(MODELS_DIR, "phishing_assets.pkl")
+    model_path = os.path.join(MODELS_DIR, "best_phishing_model.pth")
 
-    with open('models/best_model_arch.pkl', 'rb') as f:
-        best_arch = pickle.load(f)
+    if not os.path.exists(assets_path) or not os.path.exists(model_path):
+        raise FileNotFoundError(
+            "Model assets not found. Run data_preprocessing.py and train_models.py first."
+        )
 
-    input_dim = len(feature_cols)
-    
-    if best_arch == "CustomMLP":
-        model = CustomMLP(input_dim=input_dim)
-    elif best_arch == "WideAndDeep":
-        model = WideAndDeep(input_dim=input_dim)
-    else:
-        model = SimpleLSTM(input_dim=input_dim)
-
-    model.load_state_dict(torch.load('models/best_model.pth', map_location=torch.device('cpu')))
+    assets = load_pickle(assets_path)
+    model = create_model(
+        model_key=assets["best_model_key"],
+        vocab_size=len(assets["vocabulary"]),
+        numeric_dim=len(assets["numeric_feature_columns"]),
+        output_dim=2,
+    )
+    model.load_state_dict(torch.load(model_path, map_location=torch.device("cpu")))
     model.eval()
-    
-    return encoders, feature_cols, model
+    return assets, model
 
 
 try:
-    encoders, feature_cols, model = load_assets()
-except Exception as e:
-    st.error(f"Gerekli dosyalar bulunamadı. Lütfen önce modelleri eğittiğinizden emin olun. Hata: {e}")
+    assets, model = load_assets()
+except Exception as exc:
+    st.error(str(exc))
     st.stop()
 
-col1, col2 = st.columns(2)
 
-with col1:
-    year = st.selectbox("Sezon (Yıl)", options=range(2019, 2027), index=7)
-    track = st.selectbox("Pist (Track)", options=sorted(encoders['Track'].classes_))
-    starting_grid = st.number_input("Başlangıç Pozisyonu (Starting Grid)", min_value=1, max_value=24, value=1)
+col_left, col_right = st.columns([2, 1])
 
-with col2:
-    driver = st.selectbox("Sürücü (Driver)", options=sorted(encoders['Driver'].classes_))
-    team = st.selectbox("Takım (Team)", options=sorted(encoders['Team'].classes_))
+with col_left:
+    subject = st.text_input("Email subject", placeholder="Urgent: Verify your account")
+    body = st.text_area(
+        "Email body",
+        height=280,
+        placeholder="Paste the email content here...",
+    )
 
-if st.button("🏎️ Sonucu Tahmin Et", use_container_width=True):
-    with st.spinner('Motorlar ısınıyor... Yapay zeka düşünüyor...'):
-        track_encoded = encoders['Track'].transform([track])[0]
-        driver_encoded = encoders['Driver'].transform([driver])[0]
-        team_encoded = encoders['Team'].transform([team])[0]
-        
-        input_data = {
-            'Track': track_encoded,
-            'Driver': driver_encoded,
-            'Team': team_encoded,
-            'Starting Grid': starting_grid,
-            'Year': year
-        }
+with col_right:
+    url_count = st.number_input("URL count", min_value=0.0, value=0.0, step=1.0)
+    url_length_max = st.number_input("Max URL length", min_value=0.0, value=0.0, step=1.0)
+    url_length_avg = st.number_input("Average URL length", min_value=0.0, value=0.0, step=1.0)
+    url_subdom_max = st.number_input("Max subdomain count", min_value=0.0, value=0.0, step=1.0)
+    url_subdom_avg = st.number_input("Average subdomain count", min_value=0.0, value=0.0, step=1.0)
+    attachment_count = st.number_input("Attachment count", min_value=0.0, value=0.0, step=1.0)
+    has_attachments = st.checkbox("Has attachments")
+    content_types = st.selectbox(
+        "Content type",
+        options=[
+            "text/plain",
+            "text/html",
+            "multipart/alternative",
+            "multipart/mixed",
+            "other",
+        ],
+        index=0,
+    )
+    language = st.selectbox("Language", options=["en", "de", "fr", "es", "other"], index=0)
 
-        input_df = pd.DataFrame([input_data])
 
-        cat_cols = ['Track', 'Driver', 'Team', 'Year']
-        input_df = pd.get_dummies(input_df, columns=cat_cols)
-        
-        final_input = pd.DataFrame(columns=feature_cols)
-        for col in feature_cols:
-            if col in input_df.columns:
-                final_input[col] = input_df[col]
-            else:
-                final_input[col] = 0
+if st.button("Predict Email Type", use_container_width=True):
+    if not subject.strip() and not body.strip():
+        st.warning("Please provide at least a subject or body.")
+        st.stop()
 
-        X_tensor = torch.tensor(final_input.values.astype(np.float32))
+    input_df = pd.DataFrame(
+        [
+            {
+                "subject": subject,
+                "body": body,
+                "url_count": url_count,
+                "url_length_max": url_length_max,
+                "url_length_avg": url_length_avg,
+                "url_subdom_max": url_subdom_max,
+                "url_subdom_avg": url_subdom_avg,
+                "attachment_count": attachment_count,
+                "has_attachments": has_attachments,
+                "content_types": content_types if content_types != "other" else "",
+                "language": language if language != "other" else "",
+            }
+        ]
+    )
 
-        with torch.no_grad():
-            output = model(X_tensor)
-            _, predicted = torch.max(output.data, 1)
-            predicted_class = predicted.item()
+    prepared_df = prepare_email_dataframe(input_df)
+    text_sequences, numeric_features, _ = encode_dataframe(
+        prepared_df,
+        assets["vocabulary"],
+        assets["numeric_scaler"],
+        assets["max_length"],
+    )
 
-            probabilities = torch.nn.functional.softmax(output, dim=1).numpy()[0]
+    text_tensor = torch.tensor(text_sequences, dtype=torch.long)
+    numeric_tensor = torch.tensor(numeric_features, dtype=torch.float32)
 
-        classes = {
-            0: ("Podyum! (İlk 3)", "🏆", "#FFD700"),
-            1: ("Puan Alır (İlk 10)", "✅", "#1E90FF"),
-            2: ("Puan Alamaz / Bitiremez (11+)", "❌", "#A9A9A9")
-        }
-        
-        text_result, icon, color = classes[predicted_class]
+    with torch.no_grad():
+        logits = model(text_tensor, numeric_tensor)
+        probabilities = torch.softmax(logits, dim=1).cpu().numpy()[0]
+        predicted_class = int(torch.argmax(logits, dim=1).item())
 
-        st.markdown(f"""
-            <div class='prediction-box'>
-                <h2 style='color: {color}; margin: 0;'>{icon} {text_result}</h2>
-                <br>
-                <p><strong>Yapay Zeka Güven Oranı:</strong></p>
-                <p>Podyum: %{probabilities[0]*100:.1f} | Puan: %{probabilities[1]*100:.1f} | Puansız: %{probabilities[2]*100:.1f}</p>
-            </div>
-        """, unsafe_allow_html=True)
+    safe_prob = probabilities[0] * 100
+    phishing_prob = probabilities[1] * 100
+
+    if predicted_class == 1:
+        css_class = "result-box phishing-box"
+        label = "Phishing Email"
+        color = "#ff8080"
+    else:
+        css_class = "result-box safe-box"
+        label = "Safe Email"
+        color = "#7fe7a5"
+
+    st.markdown(
+        f"""
+        <div class="{css_class}">
+            <h2 style="margin:0; color:{color};">{label}</h2>
+            <p style="margin-top:10px;">Model: {assets["best_model_name"]}</p>
+            <p>Safe probability: %{safe_prob:.2f}</p>
+            <p>Phishing probability: %{phishing_prob:.2f}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )

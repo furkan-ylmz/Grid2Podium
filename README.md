@@ -1,49 +1,103 @@
-# Formula 1 Yaris Sonucu Tahmin Sistemi
+# Phishing Email Detection System
 
-## Proje Hakkinda
-Bu proje, 2019-2026 yillari arasindaki Formula 1 yaris verilerini kullanarak, yaris sonuclari uzerine bir siniflandirma tahmini yapmayi amaclamaktadir. Proje kapsaminda uc farkli derin ogrenme modeli gelistirilmis ve performanslari karsilastirilmistir.
+## Project Overview
+This project detects whether an email is safe or phishing by using the MeAJOR dataset and three deep learning models trained on the same data. The repository keeps the same workflow as the original project:
 
-## Problem Tanimi
-Yaris sonuclari, veri setindeki dengesizligi azaltmak ve model basarisini artirmak amaciyla uc ana kategoriye (Tier) ayrilmistir:
-- Sinif 0 (Podyum): 1., 2. ve 3. sirada bitirenler.
-- Sinif 1 (Puan Alanlar): 4. ile 10. sira arasinda bitirenler.
-- Sinif 2 (Puansiz/Bitiremeyenler): 11. sira ve ustu veya yarisi tamamlayamayanlar.
+1. preprocess the raw dataset
+2. train and compare three models
+3. launch a Streamlit demo for inference
 
-## Kullanilan Teknolojiler
-- Dil: Python 3.11+
-- Derin Ogrenme Kutuphanesi: PyTorch
-- Veri Isleme: Pandas, NumPy, Scikit-learn
-- Gorsellestirme: Matplotlib, Seaborn
-- Arayuz: Streamlit
+## Dataset
+- Source: MeAJOR (Merged email Assets from Joint Open-source Repositories)
+- File location expected by the project:
+  - `datasets/phishing_email/meajor_cleaned_preprocessed.csv`
+- Target label:
+  - `0` -> Safe Email
+  - `1` -> Phishing Email
 
-## Proje Yapisi
-- data_preprocessing.py: Veri setlerinin birlestirilmesi, veri sizintisi (leakage) yapan sutunlarin temizlenmesi ve verinin %70 egitim, %20 dogrulama, %10 test olarak bolunmesi islemlerini yapar.
-- train_models.py: Uc farkli modelin (MLP, LSTM, Wide & Deep) egitilmesi, test edilmesi ve karsilastirmali grafiklerin olusturulmasi sureclerini yonetir.
-- app.py: Egitilmis en basarili modelin (LSTM) kullanici tarafindan test edilebilmesini saglayan web arayuzu dosyasidir.
-- datasets/: Ham CSV dosyalarinin bulundugu dizin.
-- processed_data/: Islenmis verilerin ve encoder dosyalarinin saklandigi dizin.
-- models/: Egitilmis model agirliklarinin ve ozellik sutunlarinin saklandigi dizin.
-- results/: Egitim kaybi, dogruluk ve confusion matrix grafiklerinin kaydedildigi dizin.
+## Features Used
+The project does not need every column from the dataset. It focuses on the fields that are most useful for phishing detection:
 
-## Model Mimarileri
-1. MLP: BatchNorm, Dropout ve ReLU aktivasyon fonksiyonlari ile desteklenmis cok katmanli algilayici mimarisi.
-2. LSTM: F1 verilerindeki sirali yapiyi ve takvimsel etkileri yakalamak amaciyla kullanilan uzun kisa sureli bellek agi.
-3. Wide & Deep: Tablosal verilerde hem genis ozellikleri hem de derin ogrenme modellerinin yakaladigi karmasik iliskileri birlestiren mimari.
+- Text features:
+  - `subject`
+  - `body`
+- Structural features:
+  - `url_count`
+  - `url_length_max`
+  - `url_length_avg`
+  - `url_subdom_max`
+  - `url_subdom_avg`
+  - `attachment_count`
+  - `has_attachments`
+  - `content_types`
+  - `language`
+- Derived features:
+  - text length
+  - word count
+  - suspicious keyword count
+  - uppercase ratio
+  - digit ratio
+  - punctuation counts
 
-## Kurulum ve Calistirma
-Sistemi yerelde calistirmak icin asagidaki adimlari izleyin:
+## Models
+The training script compares three models on the same dataset:
 
-1. Gerekli kutuphaneleri yukleyin:
-   pip install torch pandas numpy scikit-learn matplotlib seaborn streamlit
+1. `Custom Mean Embedding + MLP`
+2. `TextCNN + Metadata`
+3. `BiLSTM + Metadata`
 
-2. Veri on isleme adimini calistirin:
-   python data_preprocessing.py
+The best model on validation F1-score is saved for the Streamlit app.
 
-3. Modelleri egitin:
-   python train_models.py
+## Project Structure
+- `data_preprocessing.py`: reads the MeAJOR CSV, cleans the data, derives features, and writes train/validation/test splits
+- `train_models.py`: trains three deep learning models, compares metrics, and saves the best model
+- `app.py`: Streamlit interface for phishing email prediction
+- `phishing_utils.py`: shared preprocessing, encoding, and model definitions
+- `datasets/phishing_email/`: raw dataset location
+- `processed_data/`: generated train/validation/test CSV files
+- `models/`: saved model weights and preprocessing assets
+- `results/`: plots and metric summaries
 
-4. Web arayuzunu baslatin:
-   streamlit run app.py
+## Installation
+Install the main dependencies:
 
-## Sonuclar
-Yapilan deneyler sonucunda LSTM modeli, yarislarin sirali yapisini ve surucu/takim devamligini capture etme yetenegi sayesinde yaklasik %74 dogruluk orani ile en yuksek performansi gostermistir. Detayli karsilastirmalar ve metrikler (Accuracy, Precision, Recall, F1-Score) 'results' klasoru altindaki grafiklerde sunulmustur.
+```bash
+pip install torch pandas numpy matplotlib seaborn streamlit
+```
+
+## Usage
+1. Prepare the dataset:
+
+```bash
+python data_preprocessing.py
+```
+
+2. Train the models:
+
+```bash
+python train_models.py
+```
+
+3. Start the demo:
+
+```bash
+streamlit run app.py
+```
+
+## Quick Smoke Test
+For a faster local check before full training:
+
+```bash
+python data_preprocessing.py --max-samples 5000
+python train_models.py --max-samples 5000 --epochs 2
+```
+
+## Outputs
+After training, the project produces:
+
+- `results/training_loss.png`
+- `results/validation_accuracy.png`
+- `results/confusion_matrices.png`
+- `results/metrics_summary.csv`
+- `models/best_phishing_model.pth`
+- `models/phishing_assets.pkl`

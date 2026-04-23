@@ -1,251 +1,360 @@
-import pandas as pd
-import numpy as np
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from torch.utils.data import DataLoader, TensorDataset
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
-import matplotlib.pyplot as plt
-import seaborn as sns
+import argparse
+import copy
 import os
 
-print("Veriler yükleniyor...")
-train_df = pd.read_csv('processed_data/train.csv')
-val_df = pd.read_csv('processed_data/val.csv')
-test_df = pd.read_csv('processed_data/test.csv')
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import seaborn as sns
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader
 
-cat_cols = ['Track', 'Driver', 'Team', 'Year']
+from phishing_utils import (
+    DEFAULT_MAX_LENGTH,
+    DEFAULT_VOCAB_SIZE,
+    MODELS_DIR,
+    NUMERIC_FEATURE_COLUMNS,
+    PROCESSED_DIR,
+    RESULTS_DIR,
+    EmailDataset,
+    build_vocabulary,
+    create_model,
+    encode_dataframe,
+    fit_numeric_scaler,
+    save_pickle,
+)
 
-all_df = pd.concat([train_df, val_df, test_df], keys=['train', 'val', 'test'])
-all_df = pd.get_dummies(all_df, columns=cat_cols)
 
-train_df = all_df.xs('train')
-val_df = all_df.xs('val')
-test_df = all_df.xs('test')
+MODEL_SPECS = [
+    ("mean_mlp", "Custom Mean Embedding + MLP"),
+    ("text_cnn", "TextCNN + Metadata"),
+    ("bi_lstm", "BiLSTM + Metadata"),
+]
 
-X_train = train_df.drop('Target_Tier', axis=1).values.astype(np.float32)
-y_train = train_df['Target_Tier'].values.astype(np.int64)
 
-X_val = val_df.drop('Target_Tier', axis=1).values.astype(np.float32)
-y_val = val_df['Target_Tier'].values.astype(np.int64)
+def parse_args():
+    parser = argparse.ArgumentParser(description="Train phishing email classifiers.")
+    parser.add_argument("--epochs", type=int, default=6, help="Training epochs per model.")
+    parser.add_argument("--batch-size", type=int, default=128, help="Batch size.")
+    parser.add_argument("--learning-rate", type=float, default=1e-3, help="Learning rate.")
+    parser.add_argument("--max-length", type=int, default=DEFAULT_MAX_LENGTH, help="Maximum token length.")
+    parser.add_argument("--max-vocab-size", type=int, default=DEFAULT_VOCAB_SIZE, help="Maximum vocabulary size.")
+    parser.add_argument("--patience", type=int, default=2, help="Early stopping patience on validation F1.")
+    parser.add_argument("--max-samples", type=int, default=None, help="Optional cap for smoke tests.")
+    return parser.parse_args()
 
-X_test = test_df.drop('Target_Tier', axis=1).values.astype(np.float32)
-y_test = test_df['Target_Tier'].values.astype(np.int64)
 
-batch_size = 256
-train_loader = DataLoader(TensorDataset(torch.tensor(X_train), torch.tensor(y_train)), batch_size=batch_size, shuffle=True)
-val_loader = DataLoader(TensorDataset(torch.tensor(X_val), torch.tensor(y_val)), batch_size=batch_size)
-test_loader = DataLoader(TensorDataset(torch.tensor(X_test), torch.tensor(y_test)), batch_size=batch_size)
+def load_split(split_name):
+    path = os.path.join(PROCESSED_DIR, f"{split_name}.csv")
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Processed split not found: {path}. Run data_preprocessing.py first.")
+    return pd.read_csv(path)
 
-input_dim = X_train.shape[1]
-output_dim = 3
 
-class CustomMLP(nn.Module):
-    def __init__(self, input_dim, output_dim):
-        super(CustomMLP, self).__init__()
-        self.net = nn.Sequential(
-            nn.Linear(input_dim, 128),
-            nn.BatchNorm1d(128),
-            nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(128, 64),
-            nn.BatchNorm1d(64),
-            nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(64, output_dim)
-        )
-        
-    def forward(self, x):
-        return self.net(x)
+def limit_split_size(df, max_samples):
+    if max_samples is None or max_samples >= len(df):
+        return df
+    sampled_parts = []
+    for _, group in df.groupby("label"):
+        take_n = max(1, int(round(max_samples * len(group) / len(df))))
+        take_n = min(take_n, len(group))
+        sampled_parts.append(group.sample(n=take_n, random_state=42))
+    limited = pd.concat(sampled_parts).sample(frac=1.0, random_state=42).reset_index(drop=True)
+    return limited
 
-class SimpleLSTM(nn.Module):
-    def __init__(self, input_dim, hidden_dim=64, output_dim=3):
-        super(SimpleLSTM, self).__init__()
-        self.lstm = nn.LSTM(input_dim, hidden_dim, batch_first=True)
-        self.fc = nn.Linear(hidden_dim, output_dim)
-        
-    def forward(self, x):
-        x = x.unsqueeze(1) 
-        out, _ = self.lstm(x)
-        out = out[:, -1, :]
-        return self.fc(out)
 
-class WideAndDeep(nn.Module):
-    def __init__(self, input_dim, output_dim):
-        super(WideAndDeep, self).__init__()
-        # Deep part
-        self.deep = nn.Sequential(
-            nn.Linear(input_dim, 256),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(256, 128),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(128, 64),
-            nn.ReLU()
-        )
-        self.wide = nn.Linear(input_dim, output_dim)
-        self.out = nn.Linear(64 + output_dim, output_dim)
-        
-    def forward(self, x):
-        deep_out = self.deep(x)
-        wide_out = self.wide(x)
-        combined = torch.cat([deep_out, wide_out], dim=1)
-        return self.out(combined)
+def build_dataloaders(train_df, val_df, test_df, vocabulary, scaler, max_length, batch_size):
+    train_text, train_numeric, train_labels = encode_dataframe(train_df, vocabulary, scaler, max_length)
+    val_text, val_numeric, val_labels = encode_dataframe(val_df, vocabulary, scaler, max_length)
+    test_text, test_numeric, test_labels = encode_dataframe(test_df, vocabulary, scaler, max_length)
 
-def train_model(model, name, epochs=30):
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.01)
-    
-    train_losses = []
-    val_accuracies = []
-    
-    for epoch in range(epochs):
-        model.train()
-        running_loss = 0.0
-        for X_b, y_b in train_loader:
-            optimizer.zero_grad()
-            outputs = model(X_b)
-            loss = criterion(outputs, y_b)
-            loss.backward()
-            optimizer.step()
-            running_loss += loss.item()
-            
-        avg_loss = running_loss / len(train_loader)
-        train_losses.append(avg_loss)
+    train_dataset = EmailDataset(train_text, train_numeric, train_labels)
+    val_dataset = EmailDataset(val_text, val_numeric, val_labels)
+    test_dataset = EmailDataset(test_text, test_numeric, test_labels)
 
-        model.eval()
-        correct = 0
-        total = 0
-        with torch.no_grad():
-            for X_b, y_b in val_loader:
-                outputs = model(X_b)
-                _, predicted = torch.max(outputs.data, 1)
-                total += y_b.size(0)
-                correct += (predicted == y_b).sum().item()
-        val_acc = correct / total
-        val_accuracies.append(val_acc)
-        
-    return train_losses, val_accuracies
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
-def evaluate_model(model, name):
+    return train_loader, val_loader, test_loader
+
+
+def run_epoch(model, loader, criterion, optimizer, device):
+    model.train()
+    running_loss = 0.0
+    for batch in loader:
+        text_ids = batch["text"].to(device)
+        numeric_features = batch["numeric"].to(device)
+        labels = batch["label"].to(device)
+
+        optimizer.zero_grad()
+        logits = model(text_ids, numeric_features)
+        loss = criterion(logits, labels)
+        loss.backward()
+        optimizer.step()
+        running_loss += loss.item()
+    return running_loss / max(1, len(loader))
+
+
+def evaluate_model(model, loader, device):
     model.eval()
-    y_true = []
-    y_pred = []
-    
+    all_labels = []
+    all_predictions = []
+
     with torch.no_grad():
-        for X_b, y_b in test_loader:
-            outputs = model(X_b)
-            _, predicted = torch.max(outputs.data, 1)
-            y_true.extend(y_b.numpy())
-            y_pred.extend(predicted.numpy())
-            
-    acc = accuracy_score(y_true, y_pred)
-    prec = precision_score(y_true, y_pred, average='weighted', zero_division=0)
-    rec = recall_score(y_true, y_pred, average='weighted', zero_division=0)
-    f1 = f1_score(y_true, y_pred, average='weighted', zero_division=0)
-    cm = confusion_matrix(y_true, y_pred)
-    
-    print(f"--- {name} Sonuçları (Test Seti Üzerinde) ---")
-    print(f"Accuracy : {acc:.4f}")
-    print(f"Precision: {prec:.4f}")
-    print(f"Recall   : {rec:.4f}")
-    print(f"F1-Score : {f1:.4f}\n")
-    
-    return acc, prec, rec, f1, cm
+        for batch in loader:
+            text_ids = batch["text"].to(device)
+            numeric_features = batch["numeric"].to(device)
+            labels = batch["label"].cpu().numpy()
 
-def plot_results(all_train_losses, all_val_accs, all_cms, model_names):
-    os.makedirs('results', exist_ok=True)
+            logits = model(text_ids, numeric_features)
+            predictions = torch.argmax(logits, dim=1).cpu().numpy()
+
+            all_labels.extend(labels)
+            all_predictions.extend(predictions)
+
+    cm = binary_confusion_matrix(all_labels, all_predictions)
+    accuracy, precision, recall, f1 = binary_classification_metrics(cm)
+    return {
+        "accuracy": accuracy,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+        "confusion_matrix": cm,
+    }
+
+
+def binary_confusion_matrix(labels, predictions):
+    labels = np.asarray(labels, dtype=np.int64)
+    predictions = np.asarray(predictions, dtype=np.int64)
+
+    true_negative = int(np.sum((labels == 0) & (predictions == 0)))
+    false_positive = int(np.sum((labels == 0) & (predictions == 1)))
+    false_negative = int(np.sum((labels == 1) & (predictions == 0)))
+    true_positive = int(np.sum((labels == 1) & (predictions == 1)))
+
+    return np.array([[true_negative, false_positive], [false_negative, true_positive]], dtype=np.int64)
+
+
+def binary_classification_metrics(confusion):
+    tn, fp = confusion[0]
+    fn, tp = confusion[1]
+    total = tn + fp + fn + tp
+
+    accuracy = (tp + tn) / total if total else 0.0
+    precision = tp / (tp + fp) if (tp + fp) else 0.0
+    recall = tp / (tp + fn) if (tp + fn) else 0.0
+    f1 = (2 * precision * recall) / (precision + recall) if (precision + recall) else 0.0
+    return accuracy, precision, recall, f1
+
+
+def train_single_model(model_key, model_name, train_loader, val_loader, device, args, class_weights):
+    model = create_model(
+        model_key=model_key,
+        vocab_size=args.vocab_size,
+        numeric_dim=args.numeric_dim,
+        output_dim=2,
+    ).to(device)
+    criterion = nn.CrossEntropyLoss(weight=class_weights)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
+
+    history = {"train_loss": [], "val_accuracy": [], "val_f1": []}
+    best_state = None
+    best_metrics = None
+    best_f1 = -1.0
+    stale_epochs = 0
+
+    for epoch in range(args.epochs):
+        train_loss = run_epoch(model, train_loader, criterion, optimizer, device)
+        val_metrics = evaluate_model(model, val_loader, device)
+
+        history["train_loss"].append(train_loss)
+        history["val_accuracy"].append(val_metrics["accuracy"])
+        history["val_f1"].append(val_metrics["f1"])
+
+        print(
+            f"{model_name} | epoch {epoch + 1}/{args.epochs} | "
+            f"loss={train_loss:.4f} | val_acc={val_metrics['accuracy']:.4f} | val_f1={val_metrics['f1']:.4f}"
+        )
+
+        if val_metrics["f1"] > best_f1:
+            best_f1 = val_metrics["f1"]
+            best_state = copy.deepcopy(model.state_dict())
+            best_metrics = val_metrics
+            stale_epochs = 0
+        else:
+            stale_epochs += 1
+            if stale_epochs >= args.patience:
+                break
+
+    model.load_state_dict(best_state)
+    return model, history, best_metrics
+
+
+def plot_results(histories, metrics_by_model):
+    os.makedirs(RESULTS_DIR, exist_ok=True)
 
     plt.figure(figsize=(10, 5))
-    for i, model_name in enumerate(model_names):
-        plt.plot(all_train_losses[i], label=model_name)
-    plt.title('Training Loss Karşılaştırması')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
+    for model_name, history in histories.items():
+        plt.plot(history["train_loss"], label=model_name)
+    plt.title("Training Loss Comparison")
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
     plt.legend()
-    plt.savefig('results/training_loss.png')
-    plt.close()
-
-    plt.figure(figsize=(10, 5))
-    for i, model_name in enumerate(model_names):
-        plt.plot(all_val_accs[i], label=model_name)
-    plt.title('Validation Accuracy Karşılaştırması')
-    plt.xlabel('Epoch')
-    plt.ylabel('Accuracy')
-    plt.legend()
-    plt.savefig('results/validation_accuracy.png')
-    plt.close()
-
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
-    for i, model_name in enumerate(model_names):
-        sns.heatmap(all_cms[i], annot=True, fmt='d', ax=axes[i], cmap='Blues', 
-                    xticklabels=['Podyum', 'Puan', 'Puansız'], 
-                    yticklabels=['Podyum', 'Puan', 'Puansız'])
-        axes[i].set_title(f'{model_name} \nConfusion Matrix')
-        axes[i].set_xlabel('Tahmin Edilen')
-        axes[i].set_ylabel('Gerçek')
     plt.tight_layout()
-    plt.savefig('results/confusion_matrices.png')
+    plt.savefig(os.path.join(RESULTS_DIR, "training_loss.png"))
     plt.close()
+
+    plt.figure(figsize=(10, 5))
+    for model_name, history in histories.items():
+        plt.plot(history["val_accuracy"], label=model_name)
+    plt.title("Validation Accuracy Comparison")
+    plt.xlabel("Epoch")
+    plt.ylabel("Accuracy")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(os.path.join(RESULTS_DIR, "validation_accuracy.png"))
+    plt.close()
+
+    fig, axes = plt.subplots(1, len(metrics_by_model), figsize=(18, 5))
+    if len(metrics_by_model) == 1:
+        axes = [axes]
+
+    for axis, (model_name, metrics) in zip(axes, metrics_by_model.items()):
+        sns.heatmap(
+            metrics["confusion_matrix"],
+            annot=True,
+            fmt="d",
+            cmap="Blues",
+            ax=axis,
+            xticklabels=["Safe", "Phishing"],
+            yticklabels=["Safe", "Phishing"],
+        )
+        axis.set_title(f"{model_name}\nConfusion Matrix")
+        axis.set_xlabel("Predicted")
+        axis.set_ylabel("Actual")
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(RESULTS_DIR, "confusion_matrices.png"))
+    plt.close()
+
+
+def save_metrics_summary(metrics_by_model):
+    rows = []
+    for model_name, metrics in metrics_by_model.items():
+        rows.append(
+            {
+                "model": model_name,
+                "accuracy": metrics["accuracy"],
+                "precision": metrics["precision"],
+                "recall": metrics["recall"],
+                "f1_score": metrics["f1"],
+            }
+        )
+    pd.DataFrame(rows).to_csv(os.path.join(RESULTS_DIR, "metrics_summary.csv"), index=False)
+
 
 def main():
-    print("Modeller tanımlanıyor...")
-    model_mlp = CustomMLP(input_dim, output_dim)
-    model_lstm = SimpleLSTM(input_dim, hidden_dim=64, output_dim=output_dim)
-    model_wide_deep = WideAndDeep(input_dim, output_dim)
-    
-    models = [model_mlp, model_lstm, model_wide_deep]
-    model_names = ['Özel MLP (Model 1)', 'LSTM (Model 2)', 'Wide & Deep (Model 3)']
-    
-    all_train_losses = []
-    all_val_accs = []
-    all_cms = []
-    
-    best_acc = 0.0
-    best_model = None
-    best_model_name = ""
+    args = parse_args()
+    train_df = limit_split_size(load_split("train"), args.max_samples)
+    val_df = limit_split_size(load_split("val"), None if args.max_samples is None else max(500, args.max_samples // 2))
+    test_df = limit_split_size(load_split("test"), None if args.max_samples is None else max(500, args.max_samples // 2))
 
-    for model, name in zip(models, model_names):
-        print(f"\n{name} eğitimi başlıyor...")
-        train_losses, val_accs = train_model(model, name, epochs=30)
-        all_train_losses.append(train_losses)
-        all_val_accs.append(val_accs)
+    vocabulary = build_vocabulary(train_df["text"], max_vocab_size=args.max_vocab_size)
+    scaler = fit_numeric_scaler(train_df)
 
-        acc, prec, rec, f1, cm = evaluate_model(model, name)
-        all_cms.append(cm)
+    train_loader, val_loader, test_loader = build_dataloaders(
+        train_df,
+        val_df,
+        test_df,
+        vocabulary,
+        scaler,
+        args.max_length,
+        args.batch_size,
+    )
 
-        if acc > best_acc:
-            best_acc = acc
-            best_model = model
-            best_model_name = name
+    label_counts = train_df["label"].value_counts().sort_index()
+    class_weights = torch.tensor(
+        [len(train_df) / max(1, label_counts.get(label, 1)) for label in range(2)],
+        dtype=torch.float32,
+    )
 
-    os.makedirs('models', exist_ok=True)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+    print(f"Training samples: {len(train_df):,}")
+    print(f"Validation samples: {len(val_df):,}")
+    print(f"Test samples: {len(test_df):,}")
+    print(f"Vocabulary size: {len(vocabulary):,}")
 
-    torch.save(best_model.state_dict(), 'models/best_model.pth')
-    
-    if "MLP" in best_model_name:
-        best_arch = "CustomMLP"
-    elif "LSTM" in best_model_name:
-        best_arch = "SimpleLSTM"
-    else:
-        best_arch = "WideAndDeep"
+    args.vocab_size = len(vocabulary)
+    args.numeric_dim = len(NUMERIC_FEATURE_COLUMNS)
+    class_weights = class_weights.to(device)
 
-    import pickle
-    feature_cols = train_df.drop('Target_Tier', axis=1).columns.tolist()
-    
-    with open('models/feature_columns.pkl', 'wb') as f:
-        pickle.dump(feature_cols, f)
-        
-    with open('models/best_model_arch.pkl', 'wb') as f:
-        pickle.dump(best_arch, f)
-        
-    print(f"\nEn iyi model: {best_model_name} ({best_acc:.4f} accuracy) 'models/best_model.pth' olarak kaydedildi.")
-    print("Özellik sütunları ve mimari bilgisi kaydedildi.")
-        
-    print("Sonuçlar grafiklere dökülüyor ('results' klasörüne kaydedildi)...")
-    plot_results(all_train_losses, all_val_accs, all_cms, model_names)
-    print("Tüm işlemler başarıyla tamamlandı!")
+    os.makedirs(MODELS_DIR, exist_ok=True)
 
-if __name__ == '__main__':
+    histories = {}
+    metrics_by_model = {}
+    best_bundle = None
+
+    for model_key, model_name in MODEL_SPECS:
+        print(f"\nTraining {model_name}...")
+        model, history, best_val_metrics = train_single_model(
+            model_key=model_key,
+            model_name=model_name,
+            train_loader=train_loader,
+            val_loader=val_loader,
+            device=device,
+            args=args,
+            class_weights=class_weights,
+        )
+
+        test_metrics = evaluate_model(model, test_loader, device)
+        histories[model_name] = history
+        metrics_by_model[model_name] = test_metrics
+
+        torch.save(model.state_dict(), os.path.join(MODELS_DIR, f"{model_key}.pth"))
+        print(
+            f"{model_name} test metrics | "
+            f"acc={test_metrics['accuracy']:.4f} "
+            f"precision={test_metrics['precision']:.4f} "
+            f"recall={test_metrics['recall']:.4f} "
+            f"f1={test_metrics['f1']:.4f}"
+        )
+
+        if best_bundle is None or best_val_metrics["f1"] > best_bundle["val_f1"]:
+            best_bundle = {
+                "model_key": model_key,
+                "model_name": model_name,
+                "model_state": copy.deepcopy(model.state_dict()),
+                "val_f1": best_val_metrics["f1"],
+                "test_metrics": test_metrics,
+            }
+
+    torch.save(best_bundle["model_state"], os.path.join(MODELS_DIR, "best_phishing_model.pth"))
+    save_pickle(
+        os.path.join(MODELS_DIR, "phishing_assets.pkl"),
+        {
+            "vocabulary": vocabulary,
+            "numeric_scaler": scaler,
+            "max_length": args.max_length,
+            "best_model_key": best_bundle["model_key"],
+            "best_model_name": best_bundle["model_name"],
+            "numeric_feature_columns": NUMERIC_FEATURE_COLUMNS,
+            "label_map": {0: "Safe Email", 1: "Phishing Email"},
+            "model_metrics": metrics_by_model,
+        },
+    )
+
+    plot_results(histories, metrics_by_model)
+    save_metrics_summary(metrics_by_model)
+
+    print("\nBest model saved:")
+    print(f"Name: {best_bundle['model_name']}")
+    print(f"Key : {best_bundle['model_key']}")
+    print(f"Path: {os.path.join(MODELS_DIR, 'best_phishing_model.pth')}")
+    print(f"Assets: {os.path.join(MODELS_DIR, 'phishing_assets.pkl')}")
+
+
+if __name__ == "__main__":
     main()

@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+
+datasets/phishing_email/
+processed_data/
+models/
+results/
+
+.venv/
+venv/
