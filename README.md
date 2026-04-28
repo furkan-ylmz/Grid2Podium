@@ -1,49 +1,49 @@
-# Formula 1 Yaris Sonucu Tahmin Sistemi
+# Formula 1 Yarış Sonucu Tahmin Sistemi
 
-## Proje Hakkinda
-Bu proje, 2019-2026 yillari arasindaki Formula 1 yaris verilerini kullanarak, yaris sonuclari uzerine bir siniflandirma tahmini yapmayi amaclamaktadir. Proje kapsaminda uc farkli derin ogrenme modeli gelistirilmis ve performanslari karsilastirilmistir.
+## Proje Hakkında
+Bu proje, 2019-2026 yılları arasındaki Formula 1 yarış verilerini kullanarak, yarış sonuçları üzerine bir sınıflandırma tahmini yapmayı amaçlamaktadır. Proje kapsamında üç farklı derin öğrenme modeli geliştirilmiş ve performansları karşılaştırılmıştır.
 
-## Problem Tanimi
-Yaris sonuclari, veri setindeki dengesizligi azaltmak ve model basarisini artirmak amaciyla uc ana kategoriye (Tier) ayrilmistir:
-- Sinif 0 (Podyum): 1., 2. ve 3. sirada bitirenler.
-- Sinif 1 (Puan Alanlar): 4. ile 10. sira arasinda bitirenler.
-- Sinif 2 (Puansiz/Bitiremeyenler): 11. sira ve ustu veya yarisi tamamlayamayanlar.
+## Problem Tanımı
+Yarış sonuçları, veri setindeki dengesizliği azaltmak ve model başarısını artırmak amacıyla üç ana kategoriye (Tier) ayrılmıştır:
+- Sınıf 0 (Podyum): 1., 2. ve 3. sırada bitirenler.
+- Sınıf 1 (Puan Alanlar): 4. ile 10. sıra arasında bitirenler.
+- Sınıf 2 (Puansız/Bitiremeyenler): 11. sıra ve üstü veya yarışı tamamlayamayanlar.
 
-## Kullanilan Teknolojiler
+## Kullanılan Teknolojiler
 - Dil: Python 3.11+
-- Derin Ogrenme Kutuphanesi: PyTorch
-- Veri Isleme: Pandas, NumPy, Scikit-learn
-- Gorsellestirme: Matplotlib, Seaborn
-- Arayuz: Streamlit
+- Derin Öğrenme Kütüphanesi: PyTorch
+- Veri İşleme: Pandas, NumPy, Scikit-learn
+- Görselleştirme: Matplotlib, Seaborn
+- Arayüz: Streamlit
 
-## Proje Yapisi
-- data_preprocessing.py: Veri setlerinin birlestirilmesi, veri sizintisi (leakage) yapan sutunlarin temizlenmesi ve verinin %70 egitim, %20 dogrulama, %10 test olarak bolunmesi islemlerini yapar.
-- train_models.py: Uc farkli modelin (MLP, LSTM, Wide & Deep) egitilmesi, test edilmesi ve karsilastirmali grafiklerin olusturulmasi sureclerini yonetir.
-- app.py: Egitilmis en basarili modelin (LSTM) kullanici tarafindan test edilebilmesini saglayan web arayuzu dosyasidir.
-- datasets/: Ham CSV dosyalarinin bulundugu dizin.
-- processed_data/: Islenmis verilerin ve encoder dosyalarinin saklandigi dizin.
-- models/: Egitilmis model agirliklarinin ve ozellik sutunlarinin saklandigi dizin.
-- results/: Egitim kaybi, dogruluk ve confusion matrix grafiklerinin kaydedildigi dizin.
+## Proje Yapısı
+- data_preprocessing.py: Veri setlerinin birleştirilmesi, veri sızıntısı (leakage) yapan sütunların temizlenmesi ve verinin %70 eğitim, %20 doğrulama, %10 test olarak bölünmesi işlemlerini yapar.
+- train_models.py: Üç farklı modelin (MLP, LSTM, Wide & Deep) eğitilmesi, test edilmesi ve karşılaştırmalı grafiklerin oluşturulması süreçlerini yönetir.
+- app.py: Eğitilmiş en başarılı modelin kullanıcı tarafından test edilebilmesini sağlayan web arayüzü dosyasıdır.
+- datasets/: Ham CSV dosyalarının bulunduğu dizin.
+- processed_data/: İşlenmiş verilerin ve encoder dosyalarının saklandığı dizin.
+- models/: Eğitilmiş model ağırlıklarının ve özellik sütunlarının saklandığı dizin.
+- results/: Eğitim kaybı, doğruluk ve confusion matrix grafiklerinin kaydedildiği dizin.
 
 ## Model Mimarileri
-1. MLP: BatchNorm, Dropout ve ReLU aktivasyon fonksiyonlari ile desteklenmis cok katmanli algilayici mimarisi.
-2. LSTM: F1 verilerindeki sirali yapiyi ve takvimsel etkileri yakalamak amaciyla kullanilan uzun kisa sureli bellek agi.
-3. Wide & Deep: Tablosal verilerde hem genis ozellikleri hem de derin ogrenme modellerinin yakaladigi karmasik iliskileri birlestiren mimari.
+1. MLP: BatchNorm, Dropout ve ReLU aktivasyon fonksiyonları ile desteklenmiş çok katmanlı algılayıcı mimarisi.
+2. LSTM: F1 verilerindeki sıralı yapıyı ve takvimsel etkileri yakalamak amacıyla kullanılan uzun kısa süreli bellek ağı.
+3. Wide & Deep: Tablosal verilerde hem geniş özellikleri hem de derin öğrenme modellerinin yakaladığı karmaşık ilişkileri birleştiren mimari.
 
-## Kurulum ve Calistirma
-Sistemi yerelde calistirmak icin asagidaki adimlari izleyin:
+## Kurulum ve Çalıştırma
+Sistemi yerelde çalıştırmak için aşağıdaki adımları izleyin:
 
-1. Gerekli kutuphaneleri yukleyin:
+1. Gerekli kütüphaneleri yükleyin:
    pip install torch pandas numpy scikit-learn matplotlib seaborn streamlit
 
-2. Veri on isleme adimini calistirin:
+2. Veri ön işleme adımını çalıştırın:
    python data_preprocessing.py
 
-3. Modelleri egitin:
+3. Modelleri eğitin:
    python train_models.py
 
-4. Web arayuzunu baslatin:
+4. Web arayüzünü başlatın:
    streamlit run app.py
 
-## Sonuclar
-Yapilan deneyler sonucunda LSTM modeli, yarislarin sirali yapisini ve surucu/takim devamligini capture etme yetenegi sayesinde yaklasik %74 dogruluk orani ile en yuksek performansi gostermistir. Detayli karsilastirmalar ve metrikler (Accuracy, Precision, Recall, F1-Score) 'results' klasoru altindaki grafiklerde sunulmustur.
+## Sonuçlar
+Projenin sonucunda eğitilmiş yapay zeka modelleri ile yarışçıların podyum ve puan tahminleri başarılı bir şekilde sunulmaktadır. Çeşitli parametreler modifiye edilerek başarı oranı (Accuracy) grafiklerle ve metriklerle (Accuracy, Precision, Recall, F1-Score) 'results' klasörü altına kaydedilmektedir.
