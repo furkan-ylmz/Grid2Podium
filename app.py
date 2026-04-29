@@ -50,21 +50,29 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown("<h1 class='main-title'>Formula 1 Sonuç Tahmin Sistemi 🏎️</h1>", unsafe_allow_html=True)
-st.write("En yüksek doğrulukla eğitilmiş yapay zeka modelimizi (MLP, LSTM veya Wide & Deep) kullanarak yarış sonuçlarını (Podyum, Puan veya Puansız) tahmin edin.")
+st.write("En yüksek doğrulukla eğitilmiş yapay zeka modelimizi kullanarak yarış sonuçlarını (Podyum, Puan veya Puansız) tahmin edin.")
 
 class CustomMLP(nn.Module):
     def __init__(self, input_dim, output_dim=3):
         super(CustomMLP, self).__init__()
         self.net = nn.Sequential(
-            nn.Linear(input_dim, 128),
+            nn.Linear(input_dim, 256),
+            nn.BatchNorm1d(256),
+            nn.ReLU(),
+            nn.Dropout(0.4),
+            nn.Linear(256, 128),
             nn.BatchNorm1d(128),
             nn.ReLU(),
             nn.Dropout(0.3),
             nn.Linear(128, 64),
             nn.BatchNorm1d(64),
             nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(64, output_dim)
+            nn.Dropout(0.2),
+            nn.Linear(64, 32),
+            nn.BatchNorm1d(32),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(32, output_dim)
         )
         
     def forward(self, x):
@@ -81,28 +89,6 @@ class SimpleLSTM(nn.Module):
         out, _ = self.lstm(x)
         out = out[:, -1, :] 
         return self.fc(out)
-
-class WideAndDeep(nn.Module):
-    def __init__(self, input_dim, output_dim=3):
-        super(WideAndDeep, self).__init__()
-        self.deep = nn.Sequential(
-            nn.Linear(input_dim, 256),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(256, 128),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(128, 64),
-            nn.ReLU()
-        )
-        self.wide = nn.Linear(input_dim, output_dim)
-        self.out = nn.Linear(64 + output_dim, output_dim)
-        
-    def forward(self, x):
-        deep_out = self.deep(x)
-        wide_out = self.wide(x)
-        combined = torch.cat([deep_out, wide_out], dim=1)
-        return self.out(combined)
 
 class CNN1D(nn.Module):
     def __init__(self, input_dim, output_dim=3):
@@ -163,30 +149,17 @@ def load_assets():
 
     input_dim = len(feature_cols)
     
-    if best_arch == "XGBoost":
-        if xgb is None:
-            raise ImportError("XGBoost modeli için xgboost kütüphanesi gerekli.")
-        model = xgb.XGBClassifier()
-        model.load_model('models/best_xgboost.json')
-    elif best_arch == "TabNet":
-        if TabNetClassifier is None:
-            raise ImportError("TabNet modeli için pytorch-tabnet kütüphanesi gerekli.")
-        model = TabNetClassifier()
-        model.load_model('models/best_tabnet.zip')
+    if best_arch == "CustomMLP":
+        model = CustomMLP(input_dim=input_dim)
+    elif best_arch == "CNN1D":
+        model = CNN1D(input_dim=input_dim)
+    elif best_arch == "TabularTransformer":
+        model = TabularTransformer(input_dim=input_dim)
     else:
-        if best_arch == "CustomMLP":
-            model = CustomMLP(input_dim=input_dim)
-        elif best_arch == "CNN1D":
-            model = CNN1D(input_dim=input_dim)
-        elif best_arch == "TabularTransformer":
-            model = TabularTransformer(input_dim=input_dim)
-        elif best_arch == "WideAndDeep":
-            model = WideAndDeep(input_dim=input_dim)
-        else:
-            model = SimpleLSTM(input_dim=input_dim)
+        model = SimpleLSTM(input_dim=input_dim)
 
-        model.load_state_dict(torch.load('models/best_model.pth', map_location=torch.device('cpu')))
-        model.eval()
+    model.load_state_dict(torch.load('models/best_model.pth', map_location=torch.device('cpu')))
+    model.eval()
     
     return encoders, feature_cols, model, best_arch
 

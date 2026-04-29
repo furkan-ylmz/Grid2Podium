@@ -45,15 +45,23 @@ class CustomMLP(nn.Module):
     def __init__(self, input_dim, output_dim):
         super(CustomMLP, self).__init__()
         self.net = nn.Sequential(
-            nn.Linear(input_dim, 128),
+            nn.Linear(input_dim, 256),
+            nn.BatchNorm1d(256),
+            nn.ReLU(),
+            nn.Dropout(0.4),
+            nn.Linear(256, 128),
             nn.BatchNorm1d(128),
             nn.ReLU(),
             nn.Dropout(0.3),
             nn.Linear(128, 64),
             nn.BatchNorm1d(64),
             nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(64, output_dim)
+            nn.Dropout(0.2),
+            nn.Linear(64, 32),
+            nn.BatchNorm1d(32),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(32, output_dim)
         )
         
     def forward(self, x):
@@ -70,29 +78,6 @@ class SimpleLSTM(nn.Module):
         out, _ = self.lstm(x)
         out = out[:, -1, :]
         return self.fc(out)
-
-class WideAndDeep(nn.Module):
-    def __init__(self, input_dim, output_dim):
-        super(WideAndDeep, self).__init__()
-        # Deep part
-        self.deep = nn.Sequential(
-            nn.Linear(input_dim, 256),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(256, 128),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(128, 64),
-            nn.ReLU()
-        )
-        self.wide = nn.Linear(input_dim, output_dim)
-        self.out = nn.Linear(64 + output_dim, output_dim)
-        
-    def forward(self, x):
-        deep_out = self.deep(x)
-        wide_out = self.wide(x)
-        combined = torch.cat([deep_out, wide_out], dim=1)
-        return self.out(combined)
 
 class CNN1D(nn.Module):
     def __init__(self, input_dim, output_dim=3):
@@ -140,43 +125,7 @@ class TabularTransformer(nn.Module):
         x = x.squeeze(1)
         return self.fc(x)
 
-class ResidualBlock(nn.Module):
-    def __init__(self, dim):
-        super(ResidualBlock, self).__init__()
-        self.fc1 = nn.Linear(dim, dim)
-        self.bn1 = nn.BatchNorm1d(dim)
-        self.fc2 = nn.Linear(dim, dim)
-        self.bn2 = nn.BatchNorm1d(dim)
-        
-    def forward(self, x):
-        residual = x
-        out = torch.relu(self.bn1(self.fc1(x)))
-        out = self.bn2(self.fc2(out))
-        out += residual
-        return torch.relu(out)
-
-class TabularResNet(nn.Module):
-    def __init__(self, input_dim, output_dim=3):
-        super(TabularResNet, self).__init__()
-        self.input_layer = nn.Sequential(
-            nn.Linear(input_dim, 128),
-            nn.BatchNorm1d(128),
-            nn.ReLU()
-        )
-        self.res_blocks = nn.Sequential(
-            ResidualBlock(128),
-            nn.Dropout(0.2),
-            ResidualBlock(128),
-            nn.Dropout(0.2)
-        )
-        self.output_layer = nn.Linear(128, output_dim)
-        
-    def forward(self, x):
-        x = self.input_layer(x)
-        x = self.res_blocks(x)
-        return self.output_layer(x)
-
-def train_model(model, name, epochs=50):
+def train_model(model, name, epochs=40):
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     
@@ -277,13 +226,11 @@ def main():
     print("Modeller tanımlanıyor...")
     model_mlp = CustomMLP(input_dim, output_dim)
     model_lstm = SimpleLSTM(input_dim, hidden_dim=64, output_dim=output_dim)
-    model_wide_deep = WideAndDeep(input_dim, output_dim)
     model_cnn1d = CNN1D(input_dim, output_dim)
     model_transformer = TabularTransformer(input_dim, output_dim)
-    model_resnet = TabularResNet(input_dim, output_dim)
     
-    models = [model_mlp, model_lstm, model_wide_deep, model_cnn1d, model_transformer, model_resnet]
-    model_names = ['Özel MLP', 'LSTM', 'Wide & Deep', '1D CNN', 'FT-Transformer', 'Tabular ResNet']
+    models = [model_mlp, model_lstm, model_cnn1d, model_transformer]
+    model_names = ['Özel MLP', 'LSTM', '1D CNN', 'FT-Transformer']
     
     all_train_losses = []
     all_val_accs = []
@@ -330,10 +277,8 @@ def main():
                 best_arch = "CNN1D"
             elif "Transformer" in name:
                 best_arch = "TabularTransformer"
-            elif "ResNet" in name:
-                best_arch = "TabularResNet"
             else:
-                best_arch = "WideAndDeep"
+                best_arch = "CustomMLP"
 
     os.makedirs('models', exist_ok=True)
 
