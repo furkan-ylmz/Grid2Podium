@@ -33,7 +33,7 @@ y_val = val_df['Target_Tier'].values.astype(np.int64)
 X_test = test_df.drop('Target_Tier', axis=1).values.astype(np.float32)
 y_test = test_df['Target_Tier'].values.astype(np.int64)
 
-batch_size = 256
+batch_size = 32
 train_loader = DataLoader(TensorDataset(torch.tensor(X_train), torch.tensor(y_train)), batch_size=batch_size, shuffle=True)
 val_loader = DataLoader(TensorDataset(torch.tensor(X_val), torch.tensor(y_val)), batch_size=batch_size)
 test_loader = DataLoader(TensorDataset(torch.tensor(X_test), torch.tensor(y_test)), batch_size=batch_size)
@@ -102,8 +102,7 @@ class CNN1D(nn.Module):
         self.conv2 = nn.Conv1d(in_channels=16, out_channels=32, kernel_size=3, padding=1)
         self.pool2 = nn.MaxPool1d(kernel_size=2)
         self.flatten = nn.Flatten()
-        
-        # Calculate flattened dimension
+
         with torch.no_grad():
             dummy = torch.zeros(1, 1, input_dim)
             dummy = self.pool2(self.conv2(self.pool1(self.conv1(dummy))))
@@ -136,7 +135,7 @@ class TabularTransformer(nn.Module):
         )
 
     def forward(self, x):
-        x = self.embedding(x).unsqueeze(1) # (batch, 1, d_model)
+        x = self.embedding(x).unsqueeze(1)
         x = self.transformer(x)
         x = x.squeeze(1)
         return self.fc(x)
@@ -177,9 +176,9 @@ class TabularResNet(nn.Module):
         x = self.res_blocks(x)
         return self.output_layer(x)
 
-def train_model(model, name, epochs=30):
+def train_model(model, name, epochs=50):
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.01)
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
     
     train_losses = []
     val_accuracies = []
@@ -212,13 +211,13 @@ def train_model(model, name, epochs=30):
         
     return train_losses, val_accuracies
 
-def evaluate_model(model, name):
+def evaluate_model(model, name, dataloader, dataset_name="Test"):
     model.eval()
     y_true = []
     y_pred = []
     
     with torch.no_grad():
-        for X_b, y_b in test_loader:
+        for X_b, y_b in dataloader:
             outputs = model(X_b)
             _, predicted = torch.max(outputs.data, 1)
             y_true.extend(y_b.numpy())
@@ -230,7 +229,7 @@ def evaluate_model(model, name):
     f1 = f1_score(y_true, y_pred, average='weighted', zero_division=0)
     cm = confusion_matrix(y_true, y_pred)
     
-    print(f"--- {name} Sonuçları (Test Seti Üzerinde) ---")
+    print(f"--- {name} Sonuçları ({dataset_name} Seti Üzerinde) ---")
     print(f"Accuracy : {acc:.4f}")
     print(f"Precision: {prec:.4f}")
     print(f"Recall   : {rec:.4f}")
@@ -284,11 +283,12 @@ def main():
     model_resnet = TabularResNet(input_dim, output_dim)
     
     models = [model_mlp, model_lstm, model_wide_deep, model_cnn1d, model_transformer, model_resnet]
-    model_names = ['Özel MLP (Model 1)', 'LSTM (Model 2)', 'Wide & Deep (Model 3)', '1D CNN (Model 4)', 'FT-Transformer (Model 5)', 'Tabular ResNet (Model 6)']
+    model_names = ['Özel MLP', 'LSTM', 'Wide & Deep', '1D CNN', 'FT-Transformer', 'Tabular ResNet']
     
     all_train_losses = []
     all_val_accs = []
     all_cms = []
+    metrics_data = []
     
     best_acc = 0.0
     best_model = None
@@ -301,11 +301,24 @@ def main():
         all_train_losses.append(train_losses)
         all_val_accs.append(val_accs)
 
-        acc, prec, rec, f1, cm = evaluate_model(model, name)
+        val_acc, val_prec, val_rec, val_f1, _ = evaluate_model(model, name, val_loader, dataset_name="Validation")
+        test_acc, test_prec, test_rec, test_f1, cm = evaluate_model(model, name, test_loader, dataset_name="Test")
         all_cms.append(cm)
+        
+        metrics_data.append({
+            'Model': name,
+            'Val_Accuracy': round(val_acc, 4),
+            'Val_Precision': round(val_prec, 4),
+            'Val_Recall': round(val_rec, 4),
+            'Val_F1': round(val_f1, 4),
+            'Test_Accuracy': round(test_acc, 4),
+            'Test_Precision': round(test_prec, 4),
+            'Test_Recall': round(test_rec, 4),
+            'Test_F1': round(test_f1, 4)
+        })
 
-        if acc > best_acc:
-            best_acc = acc
+        if test_acc > best_acc:
+            best_acc = test_acc
             best_model = model
             best_model_name = name
             
@@ -337,7 +350,30 @@ def main():
         
     print("Özellik sütunları ve mimari bilgisi kaydedildi.")
         
-    print("Sonuçlar grafiklere dökülüyor ('results' klasörüne kaydedildi)...")
+    print("Sonuçlar grafiklere dökülüyor ve tablo olarak ('results' klasörüne) kaydediliyor...")
+    
+    metrics_df = pd.DataFrame(metrics_data)
+
+    os.makedirs('results', exist_ok=True)
+
+    fig, ax = plt.subplots(figsize=(16, 1 + len(metrics_df) * 0.4))
+    ax.axis('tight')
+    ax.axis('off')
+    table = ax.table(cellText=metrics_df.values, colLabels=metrics_df.columns, loc='center', cellLoc='center')
+    table.auto_set_font_size(False)
+    table.set_fontsize(10)
+    table.scale(1, 1.8)
+    
+    for (row, col), cell in table.get_celld().items():
+        if row == 0:
+            cell.set_text_props(weight='bold')
+            cell.set_facecolor('#4c72b0')
+            cell.set_text_props(color='white')
+            
+    plt.title('Modellerin Validation ve Test Metrikleri Karşılaştırması', fontweight="bold", pad=10)
+    plt.savefig('results/model_evaluation_metrics.png', bbox_inches='tight', dpi=300)
+    plt.close()
+    
     plot_results(all_train_losses, all_val_accs, all_cms, model_names)
     print("Tüm işlemler başarıyla tamamlandı!")
 
