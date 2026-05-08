@@ -1,49 +1,33 @@
-# Formula 1 Yarış Sonucu Tahmin Sistemi
+# Grid2Podium: Formula 1 Yarış Sonucu Tahmin Sistemi
 
-## Proje Hakkında
-Bu proje, 2019-2026 yılları arasındaki Formula 1 yarış verilerini kullanarak, yarış sonuçları üzerine bir sınıflandırma tahmini yapmayı amaçlamaktadır. Proje kapsamında üç farklı derin öğrenme modeli geliştirilmiş ve performansları karşılaştırılmıştır.
+Grid2Podium, Formula 1 yarış verilerini analiz ederek pilotların yarış sonu başarılarını (Podyum, Puan veya Puansız) tahmin eden bir derin öğrenme projesidir. Çalışma kapsamında; başlangıç pozisyonu, pist özellikleri ve takım performansı gibi parametreler kullanılarak çeşitli yapay sinir ağı mimarileri üzerinden sonuç tahmini gerçekleştirilmektedir.
 
-## Problem Tanımı
-Yarış sonuçları, veri setindeki dengesizliği azaltmak ve model başarısını artırmak amacıyla üç ana kategoriye (Tier) ayrılmıştır:
-- Sınıf 0 (Podyum): 1., 2. ve 3. sırada bitirenler.
-- Sınıf 1 (Puan Alanlar): 4. ile 10. sıra arasında bitirenler.
-- Sınıf 2 (Puansız/Bitiremeyenler): 11. sıra ve üstü veya yarışı tamamlayamayanlar.
+## Veri Seti ve Metodoloji
+Bu çalışmada kullanılan veriler [Formula 1 Datasets (GitHub)](https://github.com/toUpperCase78/formula1-datasets) üzerinden temin edilmiştir. Veri seti, 2019 ve sonrası sezonları kapsayan yarış sonuçlarını içermekte olup, modellerin eğitimi öncesinde veri temizleme, ölçeklendirme ve kategorik değişken dönüşümleri gibi ön işleme aşamalarından geçirilmiştir.
 
-## Kullanılan Teknolojiler
-- Dil: Python 3.11+
-- Derin Öğrenme Kütüphanesi: PyTorch
-- Veri İşleme: Pandas, NumPy, Scikit-learn
-- Görselleştirme: Matplotlib, Seaborn
-- Arayüz: Streamlit
+## Model Performans Analizi
+Eğitilen modellerin karşılaştırmalı performans metrikleri aşağıda detaylandırılmıştır:
 
-## Proje Yapısı
-- data_preprocessing.py: Veri setlerinin birleştirilmesi, veri sızıntısı (leakage) yapan sütunların temizlenmesi ve verinin %70 eğitim, %20 doğrulama, %10 test olarak bölünmesi işlemlerini yapar.
-- train_models.py: Üç farklı modelin (MLP, LSTM, Wide & Deep) eğitilmesi, test edilmesi ve karşılaştırmalı grafiklerin oluşturulması süreçlerini yönetir.
-- app.py: Eğitilmiş en başarılı modelin kullanıcı tarafından test edilebilmesini sağlayan web arayüzü dosyasıdır.
-- datasets/: Ham CSV dosyalarının bulunduğu dizin.
-- processed_data/: İşlenmiş verilerin ve encoder dosyalarının saklandığı dizin.
-- models/: Eğitilmiş model ağırlıklarının ve özellik sütunlarının saklandığı dizin.
-- results/: Eğitim kaybı, doğruluk ve confusion matrix grafiklerinin kaydedildiği dizin.
+![Model Performans Metrikleri](results/model_evaluation_metrics.png)
 
-## Model Mimarileri
-1. MLP: BatchNorm, Dropout ve ReLU aktivasyon fonksiyonları ile desteklenmiş çok katmanlı algılayıcı mimarisi.
-2. LSTM: F1 verilerindeki sıralı yapıyı ve takvimsel etkileri yakalamak amacıyla kullanılan uzun kısa süreli bellek ağı.
-3. Wide & Deep: Tablosal verilerde hem geniş özellikleri hem de derin öğrenme modellerinin yakaladığı karmaşık ilişkileri birleştiren mimari.
+### Eğitim ve Doğrulama Dinamikleri
+Modellerin öğrenme kapasiteleri ve genelleme yetenekleri, kayıp (loss) ve doğruluk (accuracy) grafikleri aracılığıyla analiz edilmiştir:
 
-## Kurulum ve Çalıştırma
-Sistemi yerelde çalıştırmak için aşağıdaki adımları izleyin:
+**Kayıp (Loss) Analizi:**
+![Kayıp Grafikleri](results/loss_curves.png)
 
-1. Gerekli kütüphaneleri yükleyin:
-   pip install torch pandas numpy scikit-learn matplotlib seaborn streamlit
+**Doğruluk (Accuracy) Analizi:**
+![Doğruluk Grafikleri](results/accuracy_curves.png)
 
-2. Veri ön işleme adımını çalıştırın:
-   python data_preprocessing.py
+### Hata Matrisi ve Sınıflandırma Analizi
+Modellerin hedef sınıflar üzerindeki tahmin başarısını ve hata dağılımını gösteren test seti konfüzyon matrisleri:
 
-3. Modelleri eğitin:
-   python train_models.py
+![Test Konfüzyon Matrisleri](results/test_confusion_matrices.png)
 
-4. Web arayüzünü başlatın:
-   streamlit run app.py
+## Uygulanan Model Mimarileri
+Proje kapsamında, tablosal veriler üzerinde yüksek performans göstermesi hedeflenen aşağıdaki mimariler özelleştirilerek kullanılmıştır:
 
-## Sonuçlar
-Projenin sonucunda eğitilmiş yapay zeka modelleri ile yarışçıların podyum ve puan tahminleri başarılı bir şekilde sunulmaktadır. Çeşitli parametreler modifiye edilerek başarı oranı (Accuracy) grafiklerle ve metriklerle (Accuracy, Precision, Recall, F1-Score) 'results' klasörü altına kaydedilmektedir.
+*   **Custom MLP:** Batch Normalization ve Dropout regülarizasyonu içeren çok katmanlı algılayıcı mimarisi.
+*   **Hazır ve Manuel LSTM:** Zaman serisi ve sıralı veriler için optimize edilmiş, standart kütüphane fonksiyonlarının yanı sıra matematiksel mantığı manuel olarak kodlanmış Uzun Kısa Süreli Bellek mimarileri.
+*   **1D CNN:** Veri setindeki yapısal özellikleri yakalamak amacıyla tasarlanmış tek boyutlu evrişimli sinir ağı.
+*   **FT-Transformer:** Tablosal verilerde attention mekanizmasının verimliliğini test etmek amacıyla kullanılan mimari.

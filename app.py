@@ -14,13 +14,12 @@ st.markdown("""
         color: white;
     }
     .main-title {
-        color: #FF1801; /* F1 Red */
+        color: #FF1801; 
         text-align: center;
         font-family: 'Helvetica', sans-serif;
         font-weight: bold;
         padding-top: 20px;
     }
-    /* Girdi alanlarının başlıklarını beyaz yapalım */
     .stSelectbox label, .stNumberInput label {
         color: white !important;
     }
@@ -33,7 +32,6 @@ st.markdown("""
         text-align: center;
         margin-top: 25px;
     }
-    /* Buton tasarımı */
     .stButton>button {
         background-color: #FF1801;
         color: white;
@@ -131,7 +129,7 @@ class TabularTransformer(nn.Module):
         )
 
     def forward(self, x):
-        x = self.embedding(x).unsqueeze(1) # (batch, 1, d_model)
+        x = self.embedding(x).unsqueeze(1) 
         x = self.transformer(x)
         x = x.squeeze(1)
         return self.fc(x)
