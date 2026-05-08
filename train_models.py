@@ -399,7 +399,7 @@ def main():
 
     os.makedirs('results', exist_ok=True)
 
-    fig, ax = plt.subplots(figsize=(14, 8))
+    fig, ax = plt.subplots(figsize=(14, 6))
     ax.axis('tight')
     ax.axis('off')
     
@@ -420,7 +420,7 @@ def main():
             cell.set_text_props(weight='bold')
             cell.set_facecolor('#f2f2f2')
 
-    plt.title('Modellerin Tüm Veri Setleri Üzerindeki Detaylı Performans Karşılaştırması', fontweight="bold", pad=20)
+    plt.title('Modellerin Tüm Veri Setleri Üzerindeki Detaylı Performans Karşılaştırması', fontweight="bold", pad=5)
     plt.savefig('results/model_evaluation_metrics.png', bbox_inches='tight', dpi=300)
     plt.close()
     
