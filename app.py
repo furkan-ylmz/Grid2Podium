@@ -54,23 +54,22 @@ class CustomMLP(nn.Module):
     def __init__(self, input_dim, output_dim=3):
         super(CustomMLP, self).__init__()
         self.net = nn.Sequential(
-            nn.Linear(input_dim, 256),
-            nn.BatchNorm1d(256),
-            nn.ReLU(),
-            nn.Dropout(0.4),
-            nn.Linear(256, 128),
+            nn.Linear(input_dim, 128),
             nn.BatchNorm1d(128),
             nn.ReLU(),
-            nn.Dropout(0.3),
+            nn.Dropout(0.5),
             nn.Linear(128, 64),
             nn.BatchNorm1d(64),
             nn.ReLU(),
-            nn.Dropout(0.2),
+            nn.Dropout(0.4),
             nn.Linear(64, 32),
             nn.BatchNorm1d(32),
             nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(32, output_dim)
+            nn.Dropout(0.3),
+            nn.Linear(32, 16),
+            nn.BatchNorm1d(16),
+            nn.ReLU(),
+            nn.Linear(16, output_dim)
         )
         
     def forward(self, x):
@@ -80,7 +79,10 @@ class SimpleLSTM(nn.Module):
     def __init__(self, input_dim, hidden_dim=64, output_dim=3):
         super(SimpleLSTM, self).__init__()
         self.lstm = nn.LSTM(input_dim, hidden_dim, batch_first=True)
-        self.fc = nn.Linear(hidden_dim, output_dim)
+        self.fc = nn.Sequential(
+            nn.Dropout(0.3),
+            nn.Linear(hidden_dim, output_dim)
+        )
         
     def forward(self, x):
         x = x.unsqueeze(1) 
@@ -91,28 +93,32 @@ class SimpleLSTM(nn.Module):
 class CNN1D(nn.Module):
     def __init__(self, input_dim, output_dim=3):
         super(CNN1D, self).__init__()
-        self.conv1 = nn.Conv1d(in_channels=1, out_channels=16, kernel_size=3, padding=1)
+        self.conv1 = nn.Conv1d(in_channels=1, out_channels=8, kernel_size=3, padding=1)
+        self.bn1 = nn.BatchNorm1d(8)
         self.pool1 = nn.MaxPool1d(kernel_size=2)
-        self.conv2 = nn.Conv1d(in_channels=16, out_channels=32, kernel_size=3, padding=1)
-        self.pool2 = nn.MaxPool1d(kernel_size=2)
-        self.flatten = nn.Flatten()
         
+        self.conv2 = nn.Conv1d(in_channels=8, out_channels=16, kernel_size=3, padding=1)
+        self.bn2 = nn.BatchNorm1d(16)
+        self.pool2 = nn.MaxPool1d(kernel_size=2)
+        
+        self.flatten = nn.Flatten()
+
         with torch.no_grad():
             dummy = torch.zeros(1, 1, input_dim)
-            dummy = self.pool2(self.conv2(self.pool1(self.conv1(dummy))))
+            dummy = self.pool2(self.bn2(self.conv2(self.pool1(self.bn1(self.conv1(dummy))))))
             flat_dim = dummy.view(1, -1).shape[1]
             
         self.fc = nn.Sequential(
-            nn.Linear(flat_dim, 64),
+            nn.Linear(flat_dim, 32),
             nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(64, output_dim)
+            nn.Dropout(0.4),
+            nn.Linear(32, output_dim)
         )
 
     def forward(self, x):
         x = x.unsqueeze(1)
-        x = self.pool1(torch.relu(self.conv1(x)))
-        x = self.pool2(torch.relu(self.conv2(x)))
+        x = self.pool1(torch.relu(self.bn1(self.conv1(x))))
+        x = self.pool2(torch.relu(self.bn2(self.conv2(x))))
         x = self.flatten(x)
         return self.fc(x)
 
