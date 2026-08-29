@@ -21,9 +21,9 @@ The data pipeline standardizes and prepares raw historical race logs for tabular
 
 1. **Ingestion & Season Parsing:** Dynamic extraction of seasonal metadata from raw CSV logs spanning 2019 through 2026.
 2. **Target Categorization:** Multi-class target assignment based on official finishing classification:
-   - **Tier 0 (Podium):** Positions 1 to 3 🏆
-   - **Tier 1 (Points):** Positions 4 to 10 ✅
-   - **Tier 2 (No Points / DNF):** Positions 11+ and retirements ❌
+   - **Tier 0 (Podium):** Positions 1 to 3
+   - **Tier 1 (Points):** Positions 4 to 10
+   - **Tier 2 (No Points / DNF):** Positions 11+ and retirements
 3. **Feature Cleaning:** Non-predictive in-race features (`Laps`, `Points`, `Fastest Lap Time`, etc.) are eliminated to prevent data leakage. Starting grid values are normalized and cleaned.
 4. **Encoding & Stratification:**
    - Categorical entities (`Track`, `Driver`, `Team`) are mapped using `LabelEncoder` and subsequently one-hot encoded for neural input.
@@ -166,9 +166,9 @@ Veri hattı, ham yarış verilerini tablosal derin öğrenme modellerine uygun h
 
 1. **Veri Toplama ve Sezon Ayrıştırma:** 2019'dan 2026'ya kadar olan ham CSV dosyaları okunur ve sezon bilgisi dinamik olarak çıkartılır.
 2. **Hedef Sınıflandırma (Target Mapping):** Yarış bitiş pozisyonları 3 ana başarı seviyesine ayrılır:
-   - **Seviye 0 (Podyum):** 1. ile 3. sıra arası 🏆
-   - **Seviye 1 (Puan):** 4. ile 10. sıra arası ✅
-   - **Seviye 2 (Puansız / DNF):** 11. sıra ve sonrası ile yarışı tamamlayamayanlar ❌
+   - **Seviye 0 (Podyum):** 1. ile 3. sıra arası
+   - **Seviye 1 (Puan):** 4. ile 10. sıra arası
+   - **Seviye 2 (Puansız / DNF):** 11. sıra ve sonrası ile yarışı tamamlayamayanlar
 3. **Veri Temizleme:** Bilgi sızıntısını (data leakage) önlemek amacıyla yarış bittikten sonra oluşan sütunlar (`Laps`, `Points`, `Fastest Lap Time` vb.) çıkartılır. Başlangıç grid pozisyonları normalize edilir.
 4. **Kodlama ve Katmanlı Bölme:**
    - Kategorik değişkenler (`Track`, `Driver`, `Team`) `LabelEncoder` ile sayısallaştırılır ve ardından One-Hot Encoding ile modele hazır hale getirilir.
